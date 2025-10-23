@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "vision_asistida"
+version = "0.1.0"
+description = "A vision assistance application that analyzes depth and detects obstacles."
+authors = ["Your Name <youremail@example.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+opencv-python = "^4.5.3"
+torch = "^1.9.0"
+numpy = "^1.21.0"
+pyttsx3 = "^2.7"
+# Add other dependencies as needed
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
