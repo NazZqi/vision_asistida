@@ -1,4 +1,6 @@
-torch==1.12.1
+torch>=2.1.0,<3.0
+# Compatibles con torch 2.9.x (CUDA 12.6) en tu entorno
+torchvision>=0.24.0,<0.25.0
 opencv-python==4.5.3.20210927
 numpy==1.21.2
 pyttsx3==2.7

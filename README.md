@@ -12,9 +12,10 @@ Vision Asistida is a Python application designed to assist users by analyzing vi
 
 To install the necessary dependencies, run the following command:
 
-```
-pip install -r requirements.txt
-```
+1. Instala PyTorch y torchvision según tu GPU/CPU (ver https://pytorch.org/get-started/locally/). Ejemplos:
+   - CPU: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`
+   - CUDA 12.6: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`
+2. Instala el resto: `pip install -r requirements.txt`
 
 ## Usage
 

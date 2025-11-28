@@ -11,6 +11,33 @@ import sys
 DANGER_DEPTH_THRESHOLD = 0.5
 DEFAULT_ANNOUNCEMENT_COOLDOWN = 3.0
 OBSTRUCTION_PERCENT_THRESHOLD = 0.1
+YOLO_CONFIDENCE_THRESHOLD = 0.35
+APPROACH_DELTA = 0.05  # diferencia mínima en profundidad normalizada para considerar acercamiento
+TRACKING_GRID_SIZE = 80  # píxeles para agrupar detecciones cercanas
+
+MONITORED_CLASSES = {
+    "person",
+    "car",
+    "bus",
+    "truck",
+    "motorcycle",
+    "bicycle",
+    "traffic light",
+    "stop sign",
+    "train",
+}
+
+CLASS_TRANSLATIONS_ES = {
+    "person": "persona",
+    "car": "auto",
+    "bus": "autobús",
+    "truck": "camión",
+    "motorcycle": "moto",
+    "bicycle": "bicicleta",
+    "traffic light": "semáforo",
+    "stop sign": "señal de alto",
+    "train": "tren",
+}
 
 # --- Argumentos CLI ---
 # Definir el parser en el ámbito global está bien
@@ -39,6 +66,30 @@ def announce_in_thread(text):
             print(f"Error en el motor de voz: {e}")
     th = threading.Thread(target=_worker, args=(text,), daemon=True)
     th.start()
+
+
+def direction_from_center(x_center, y_center, frame_width, frame_height):
+    """Devuelve una etiqueta corta en español según la posición en la cuadrícula 3x3."""
+    zone_width = frame_width // 3
+    zone_height = frame_height // 3
+
+    if x_center < zone_width:
+        horiz = "izquierda"
+    elif x_center < zone_width * 2:
+        horiz = "centro"
+    else:
+        horiz = "derecha"
+
+    if y_center < zone_height:
+        vert = "arriba"
+    elif y_center < zone_height * 2:
+        vert = "centro"
+    else:
+        vert = "abajo"
+
+    if vert == "centro" and horiz == "centro":
+        return "en el centro"
+    return f"{vert} {horiz}"
 
 
 # --- Lógica Principal de Ejecución ---
@@ -72,6 +123,11 @@ def main():
 
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.small_transform
+    print("Cargando modelo YOLOv5 (detección de objetos)...")
+    yolo = torch.hub.load("ultralytics/yolov5", "yolov5s", pretrained=True)
+    yolo.to(device)
+    yolo.eval()
+
     print("Modelos cargados. Iniciando cámara...")
 
     # Abrir fuente: si es índice, pasar int; si es ruta, pasar string
@@ -87,6 +143,7 @@ def main():
 
     last_announcement_time = time.time()
     last_alert_message = ""
+    last_object_depths = {}
 
     print("Iniciando detector de obstáculos por profundidad... Presiona 'q' o Ctrl+C para salir.")
 
@@ -98,23 +155,20 @@ def main():
                 break
 
             (frame_height, frame_width) = frame.shape[:2]
-            zone_y1 = int(frame_height * 0.25)
-            zone_y2 = int(frame_height * 0.75)
             
+            # Cuadrícula 3x3 para analizar toda la imagen
             zone_width = frame_width // 3
-            zone1_x1 = 0
-            zone1_x2 = zone_width
-            
-            zone2_x1 = zone_width
-            zone2_x2 = zone_width * 2
-            
-            zone3_x1 = zone_width * 2
-            zone3_x2 = frame_width
-            
+            zone_height = frame_height // 3
             zones = {
-                "izquierda": (zone1_x1, zone_y1, zone1_x2, zone_y2),
-                "al frente": (zone2_x1, zone_y1, zone2_x2, zone_y2),
-                "derecha": (zone3_x1, zone_y1, zone3_x2, zone_y2)
+                "arriba izquierda": (0, 0, zone_width, zone_height),
+                "arriba centro": (zone_width, 0, zone_width * 2, zone_height),
+                "arriba derecha": (zone_width * 2, 0, frame_width, zone_height),
+                "centro izquierda": (0, zone_height, zone_width, zone_height * 2),
+                "centro": (zone_width, zone_height, zone_width * 2, zone_height * 2),
+                "centro derecha": (zone_width * 2, zone_height, frame_width, zone_height * 2),
+                "abajo izquierda": (0, zone_height * 2, zone_width, frame_height),
+                "abajo centro": (zone_width, zone_height * 2, zone_width * 2, frame_height),
+                "abajo derecha": (zone_width * 2, zone_height * 2, frame_width, frame_height),
             }
 
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -151,9 +205,72 @@ def main():
             
             cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
 
+            object_alerts = []
+            try:
+                yolo_results = yolo(img_rgb, size=640)
+                detections = yolo_results.xyxy[0].cpu().numpy()
+                for det in detections:
+                    x1, y1, x2, y2, conf, cls_id = det
+                    if conf < YOLO_CONFIDENCE_THRESHOLD:
+                        continue
+                    class_name = yolo_results.names[int(cls_id)]
+                    if class_name not in MONITORED_CLASSES:
+                        continue
+
+                    x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                    x1 = max(x1, 0)
+                    y1 = max(y1, 0)
+                    x2 = min(x2, frame_width - 1)
+                    y2 = min(y2, frame_height - 1)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+
+                    depth_region = depth_normalized[y1:y2, x1:x2]
+                    if depth_region.size == 0:
+                        continue
+                    box_depth_value = float(np.max(depth_region))
+
+                    center_x = (x1 + x2) // 2
+                    center_y = (y1 + y2) // 2
+                    tracking_key = f"{class_name}-{center_x // TRACKING_GRID_SIZE}-{center_y // TRACKING_GRID_SIZE}"
+                    prev_depth = last_object_depths.get(tracking_key)
+                    approaching = prev_depth is not None and (box_depth_value - prev_depth) > APPROACH_DELTA
+                    last_object_depths[tracking_key] = box_depth_value
+
+                    is_close = box_depth_value > DANGER_DEPTH_THRESHOLD
+                    spanish_label = CLASS_TRANSLATIONS_ES.get(class_name, class_name)
+                    direction_label = direction_from_center(center_x, center_y, frame_width, frame_height)
+
+                    label_text = f"{spanish_label} {conf:.0%}"
+                    color = (0, 0, 255) if is_close else ((0, 255, 255) if approaching else (0, 255, 0))
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame, label_text, (x1, max(0, y1 - 6)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                    if is_close or approaching:
+                        desc = f"{spanish_label} {direction_label}"
+                        if approaching and is_close:
+                            desc += " muy cerca y acercándose"
+                        elif approaching:
+                            desc += " acercándose"
+                        else:
+                            desc += " muy cerca"
+                        object_alerts.append((box_depth_value, desc))
+            except Exception as e:
+                print(f"Error en detección de objetos: {e}")
+
             current_time = time.time()
             
-            if alert_messages:
+            if object_alerts:
+                object_alerts.sort(key=lambda x: x[0], reverse=True)
+                descriptions = [desc for _, desc in object_alerts]
+                announcement = "¡Cuidado! " + join_spanish(descriptions)
+                if (current_time - last_announcement_time > ANNOUNCEMENT_COOLDOWN) or (announcement != last_alert_message):
+                    print(f"ALERTA: {announcement}")
+                    announce_in_thread(announcement)
+                    last_announcement_time = current_time
+                    last_alert_message = announcement
+            elif alert_messages:
                 announcement = "¡Cuidado! Obstáculo " + join_spanish(alert_messages)
                 if (current_time - last_announcement_time > ANNOUNCEMENT_COOLDOWN) or (announcement != last_alert_message):
                     print(f"ALERTA: {announcement}")
