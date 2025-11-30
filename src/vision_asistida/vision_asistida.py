@@ -56,12 +56,50 @@ def join_spanish(items):
     if len(items) == 2: return " y ".join(items)
     return ", ".join(items[:-1]) + " y " + items[-1]
 
+_tts_lock = threading.Lock()
+_tts_engine = None
+
+
+def _get_tts_engine():
+    """Inicializa pyttsx3 una sola vez y selecciona voz en español si está disponible."""
+    global _tts_engine
+    if _tts_engine is not None:
+        return _tts_engine
+    engine = pyttsx3.init()
+    try:
+        voices = engine.getProperty("voices") or []
+        es_voice_id = None
+        for v in voices:
+            lang = " ".join(v.languages or [])
+            name = v.name or ""
+            if "es" in lang.lower() or "span" in name.lower():
+                es_voice_id = v.id
+                break
+        if es_voice_id:
+            engine.setProperty("voice", es_voice_id)
+    except Exception as e:
+        print(f"[TTS] No se pudo seleccionar voz en español: {e}")
+
+    try:
+        engine.setProperty("volume", 1.0)
+        default_rate = engine.getProperty("rate")
+        if default_rate:
+            engine.setProperty("rate", max(140, min(190, default_rate)))
+    except Exception as e:
+        print(f"[TTS] No se pudieron ajustar volumen/velocidad: {e}")
+
+    _tts_engine = engine
+    return _tts_engine
+
+
 def announce_in_thread(text):
     def _worker(t):
         try:
-            engine = pyttsx3.init()
-            engine.say(t)
-            engine.runAndWait()
+            engine = _get_tts_engine()
+            # El lock evita superponer voces cuando llegan mensajes seguidos.
+            with _tts_lock:
+                engine.say(t)
+                engine.runAndWait()
         except Exception as e:
             print(f"Error en el motor de voz: {e}")
     th = threading.Thread(target=_worker, args=(text,), daemon=True)

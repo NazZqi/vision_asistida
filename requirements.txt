@@ -1,8 +1,14 @@
 torch>=2.1.0,<3.0
-# Compatibles con torch 2.9.x (CUDA 12.6) en tu entorno
+# Compatibles con torch 2.9.x (CPU) en tu entorno
 torchvision>=0.24.0,<0.25.0
-opencv-python==4.5.3.20210927
-numpy==1.21.2
+opencv-python
 pyttsx3==2.7
 pytest==6.2.5
 build
+timm
+ultralytics
+seaborn
+pandas
+qtawesome
+PyQt5
+PyQtWebEngine
