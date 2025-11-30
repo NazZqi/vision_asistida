@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QInputDialog,
     QLineEdit,
 )
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt, QEvent
 from PyQt5.QtGui import QImage, QPixmap, QFont, QIcon
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 import qtawesome as qta
@@ -85,9 +85,30 @@ class VisionGUI(QWidget):
         self.last_object_depths = {}
         self.alert_history = []
         self.locations = [
-            {"name": "Casa", "ubicacion": "Casa", "calle": "", "numero": "", "ciudad": "", "extra": ""},
-            {"name": "Trabajo", "ubicacion": "Trabajo", "calle": "", "numero": "", "ciudad": "", "extra": ""},
-            {"name": "Clinica", "ubicacion": "Clinica", "calle": "", "numero": "", "ciudad": "", "extra": ""},
+            {
+                "name": "Casa",
+                "ubicacion": "Casa",
+                "calle": "Playa Ancha, Porvenir Bajo, Calle Cuatro Casa 9",
+                "numero": "",
+                "ciudad": "Valparaíso, Chile",
+                "extra": "",
+            },
+            {
+                "name": "Trabajo",
+                "ubicacion": "Trabajo",
+                "calle": "General Cruz 222",
+                "numero": "",
+                "ciudad": "Valparaíso, Chile",
+                "extra": "",
+            },
+            {
+                "name": "Hospital",
+                "ubicacion": "Hospital",
+                "calle": "San Ignacio 725",
+                "numero": "",
+                "ciudad": "Valparaíso, Chile",
+                "extra": "",
+            },
         ]
         self.screen_alert = ""
 
@@ -357,13 +378,21 @@ class VisionGUI(QWidget):
         self.video_label = QLabel("Video no iniciado")
         self.video_label.setObjectName("VideoFrame")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(900, 540)
-        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_label.setMinimumHeight(380)
+        self.video_label.setMaximumHeight(460)
+        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.video_label.setScaledContents(True)  # evita que el label crezca y tape los botones
 
         # Mapa principal embebido
-        self.map_view = QWebEngineView()
-        self.map_view.setMinimumHeight(260)
+        self.map_view = QWebEngineView(self.video_label)  # hijo del video para sobreponer
+        self.map_view.setFixedSize(240, 160)
+        self.map_view.setStyleSheet(
+            "border: 2px solid #e6c531; border-radius: 10px; background: #fffdf5;"
+        )
         self.map_view.setHtml(MAP_HTML)
+        self.map_view.setAttribute(Qt.WA_StyledBackground, True)
+        self.map_view.raise_()
+        self.video_label.installEventFilter(self)
 
         self.btn_start = QPushButton("Iniciar")
         self.btn_start.setObjectName("Primary")
@@ -377,7 +406,7 @@ class VisionGUI(QWidget):
         self.btn_home.setObjectName("Secondary")
         self.btn_home.setIcon(self.micon("mdi.history"))
 
-        self.btn_map_view = QPushButton("Mapa")
+        self.btn_map_view = QPushButton("Nueva Ruta")
         self.btn_map_view.setObjectName("Secondary")
         self.btn_map_view.setIcon(self.micon("mdi.map"))
 
@@ -426,7 +455,6 @@ class VisionGUI(QWidget):
         main_layout.setSpacing(14)
         main_layout.addLayout(header)
         main_layout.addWidget(self.video_label, stretch=3)
-        main_layout.addWidget(self.map_view)
         main_layout.addWidget(self.route_instruction)
 
         route_controls = QHBoxLayout()
@@ -440,6 +468,7 @@ class VisionGUI(QWidget):
 
         self.setLayout(main_layout)
         self.resize(1220, 900)
+        self.position_overlay_map()
 
     def load_models(self):
         print("[GUI] Cargando modelo MiDaS (profundidad)...")
@@ -1056,7 +1085,7 @@ class VisionGUI(QWidget):
                 self.last_alert_message = announcement
             self.set_alert(announcement)
         elif alert_messages:
-            announcement = "Cuidado! Obstaculo " + join_spanish(alert_messages)
+            announcement = "Cuidado! Obstáculo " + join_spanish(alert_messages)
             if (current_time - self.last_announcement_time > self.announcement_cooldown) or (
                 announcement != self.last_alert_message
             ):
@@ -1074,6 +1103,21 @@ class VisionGUI(QWidget):
     def closeEvent(self, event):
         self.stop_camera()
         event.accept()
+
+    def eventFilter(self, obj, event):
+        if obj == self.video_label and event.type() == QEvent.Resize:
+            self.position_overlay_map()
+        return super().eventFilter(obj, event)
+
+    def position_overlay_map(self):
+        """Coloca el mapa sobre la esquina superior derecha del video."""
+        margin = 14
+        w = self.map_view.width()
+        h = self.map_view.height()
+        video_w = self.video_label.width()
+        x = max(margin, video_w - w - margin)
+        y = margin
+        self.map_view.move(x, y)
 
 
 if __name__ == "__main__":

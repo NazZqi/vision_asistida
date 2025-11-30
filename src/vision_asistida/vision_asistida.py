@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import argparse
 import sys
+import queue
 
 # --- Utilidades de dispositivo ---
 def select_device(preferred: str = None):
@@ -107,8 +108,10 @@ def join_spanish(items):
     if len(items) == 2: return " y ".join(items)
     return ", ".join(items[:-1]) + " y " + items[-1]
 
-_tts_lock = threading.Lock()
 _tts_engine = None
+_tts_lock = threading.Lock()
+_tts_queue = queue.Queue()
+_last_spoken_text = None
 
 
 def _get_tts_engine():
@@ -116,11 +119,13 @@ def _get_tts_engine():
     global _tts_engine
     if _tts_engine is not None:
         return _tts_engine
-    # En Windows forzamos el backend SAPI5 para minimizar problemas de audio.
+
+    # Usar SAPI5 en Windows para estabilidad
     try:
         engine = pyttsx3.init(driverName="sapi5")
     except Exception:
         engine = pyttsx3.init()
+
     try:
         voices = engine.getProperty("voices") or []
         es_voice_id = None
@@ -131,7 +136,7 @@ def _get_tts_engine():
                 es_voice_id = v.id
                 break
         if es_voice_id is None and voices:
-            es_voice_id = voices[0].id  # último recurso: primera voz disponible
+            es_voice_id = voices[0].id
         if es_voice_id:
             engine.setProperty("voice", es_voice_id)
             print(f"[TTS] Voz seleccionada: {es_voice_id}")
@@ -149,21 +154,40 @@ def _get_tts_engine():
         print(f"[TTS] No se pudieron ajustar volumen/velocidad: {e}")
 
     _tts_engine = engine
-    return _tts_engine
+    return engine
 
 
-def announce_in_thread(text):
-    def _worker(t):
+def _tts_worker():
+    """Hilo único que lee los mensajes en orden."""
+    engine = _get_tts_engine()
+    while True:
+        text = _tts_queue.get()
+        if not text:
+            _tts_queue.task_done()
+            continue
         try:
-            engine = _get_tts_engine()
-            # El lock evita superponer voces cuando llegan mensajes seguidos.
             with _tts_lock:
-                engine.say(t)
+                engine.say(text)
                 engine.runAndWait()
         except Exception as e:
-            print(f"Error en el motor de voz: {e}")
-    th = threading.Thread(target=_worker, args=(text,), daemon=True)
-    th.start()
+            print(f"[TTS] Error al leer texto: {e}")
+        _tts_queue.task_done()
+
+
+# Lanzar el hilo de voz una sola vez
+_tts_thread = threading.Thread(target=_tts_worker, daemon=True)
+_tts_thread.start()
+
+
+def announce_in_thread(text: str):
+    """Encola texto para leerlo sin bloquear."""
+    global _last_spoken_text
+    if not text:
+        return
+    if text == _last_spoken_text:
+        return
+    _last_spoken_text = text
+    _tts_queue.put(text)
 
 
 def direction_from_center(x_center, y_center, frame_width, frame_height):
@@ -253,7 +277,7 @@ def main():
                 break
 
             (frame_height, frame_width) = frame.shape[:2]
-            
+
             # Cuadrícula 3x3 para analizar toda la imagen
             zone_width = frame_width // 3
             zone_height = frame_height // 3
@@ -276,9 +300,9 @@ def main():
                 depth_map = torch.nn.functional.interpolate(
                     prediction.unsqueeze(1), size=frame.shape[:2], mode="bicubic", align_corners=False,
                 ).squeeze()
-            
+
             depth_map = depth_map.cpu().numpy()
-            
+
             depth_min, depth_max = depth_map.min(), depth_map.max()
             if depth_max - depth_min > 0:
                 depth_normalized = (depth_map - depth_min) / (depth_max - depth_min)
@@ -292,15 +316,15 @@ def main():
                 depth_zone = depth_normalized[y1:y2, x1:x2]
                 dangerous_pixels = np.sum(depth_zone > DANGER_DEPTH_THRESHOLD)
                 total_pixels_in_zone = depth_zone.size
-                
+
                 obstruction_ratio = dangerous_pixels / total_pixels_in_zone
-                
+
                 if obstruction_ratio > OBSTRUCTION_PERCENT_THRESHOLD:
                     alert_messages.append(zone_name)
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), -1)
                 else:
                     cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), -1)
-            
+
             cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
 
             object_alerts = []
@@ -358,7 +382,7 @@ def main():
                 print(f"Error en detección de objetos: {e}")
 
             current_time = time.time()
-            
+
             if object_alerts:
                 object_alerts.sort(key=lambda x: x[0], reverse=True)
                 descriptions = [desc for _, desc in object_alerts]
@@ -379,7 +403,7 @@ def main():
                 last_alert_message = ""
 
             cv2.imshow("Detector de Obstáculos por Profundidad (Presiona 'q')", frame)
-            
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
