@@ -2,6 +2,7 @@ import cv2
 import torch
 import numpy as np
 import time
+from vision_asistida import select_device
 
 # --- 1. CONFIGURACIÓN DE ARCHIVOS Y PARÁMETROS ---
 INPUT_VIDEO_PATH = "VID_20251022_170843.mp4"   # <-- ¡Poner el nombre de tu video aquí!
@@ -13,7 +14,7 @@ OBSTRUCTION_PERCENT_THRESHOLD = 0.1
 # ---------------------------------------------------
 
 # --- 2. Configuración Inicial (Modelos e IA) ---
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = select_device()
 print(f"Usando dispositivo: {device}")
 
 print("Cargando modelo MiDaS (profundidad)...")

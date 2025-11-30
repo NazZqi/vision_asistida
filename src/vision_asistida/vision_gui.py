@@ -33,6 +33,7 @@ from vision_asistida import (
     MONITORED_CLASSES,
     CLASS_TRANSLATIONS_ES,
     join_spanish,
+    select_device,
     announce_in_thread,
     direction_from_center,
 )
@@ -72,7 +73,7 @@ class VisionGUI(QWidget):
         self.camera_index = camera_index
         self.announcement_cooldown = announcement_cooldown
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = select_device()
         print(f"[GUI] Usando dispositivo: {self.device}")
 
         self.midas = None

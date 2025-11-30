@@ -15,6 +15,7 @@ To install the necessary dependencies, run the following command:
 1. Instala PyTorch y torchvision según tu GPU/CPU (ver https://pytorch.org/get-started/locally/). Ejemplos:
    - CPU: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`
    - CUDA 12.6: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`
+   - DirectML (AMD/Intel en Windows): `pip install torch-directml` (además de torch/torchvision)
 2. Instala el resto: `pip install -r requirements.txt`
 
 ## Usage
@@ -24,6 +25,13 @@ To install the necessary dependencies, run the following command:
 
 ```
 python src/vision_asistida/vision_asistida.py
+```
+
+Puedes forzar el dispositivo con `--device`, por ejemplo:
+
+```
+python src/vision_asistida/vision_asistida.py --device mps
+python src/vision_asistida/vision_asistida.py --device directml
 ```
 
 3. Follow the audio and visual prompts to navigate safely.

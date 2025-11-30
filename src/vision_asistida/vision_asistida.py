@@ -7,6 +7,55 @@ import numpy as np
 import argparse
 import sys
 
+# --- Utilidades de dispositivo ---
+def select_device(preferred: str = None):
+    """
+    Devuelve el mejor dispositivo disponible:
+    - prioriza CUDA si está disponible
+    - luego Metal/MPS (Apple Silicon)
+    - luego DirectML (Windows/AMD/Intel, requiere torch-directml)
+    - por último CPU
+    Si se pasa `preferred`, se intenta respetar (p.ej. "cuda:0", "mps", "directml", "cpu").
+    """
+    def _mps_available():
+        return bool(getattr(torch.backends, "mps", None)) and torch.backends.mps.is_available() and torch.backends.mps.is_built()
+
+    def _directml_device():
+        try:
+            import torch_directml  # type: ignore
+            return torch_directml.device()
+        except Exception:
+            return None
+
+    if preferred:
+        normalized = preferred.strip().lower()
+        if normalized.startswith("cuda"):
+            if torch.cuda.is_available():
+                return torch.device(preferred if preferred != "" else "cuda")
+            print("[Device] Se solicitó CUDA pero no está disponible, usando la mejor alternativa.")
+        elif normalized in ("mps", "metal"):
+            if _mps_available():
+                return torch.device("mps")
+            print("[Device] Se solicitó MPS pero no está disponible, usando la mejor alternativa.")
+        elif normalized in ("directml", "dml"):
+            dml = _directml_device()
+            if dml is not None:
+                return dml
+            print("[Device] Se solicitó DirectML pero no está disponible, usando la mejor alternativa.")
+        elif normalized == "cpu":
+            return torch.device("cpu")
+        else:
+            print(f"[Device] Dispositivo solicitado '{preferred}' no reconocido, usando autodetección.")
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if _mps_available():
+        return torch.device("mps")
+    dml = _directml_device()
+    if dml is not None:
+        return dml
+    return torch.device("cpu")
+
 # --- Configuración Clave ---
 DANGER_DEPTH_THRESHOLD = 0.5
 DEFAULT_ANNOUNCEMENT_COOLDOWN = 3.0
@@ -46,6 +95,8 @@ parser.add_argument("--camera", "-c", type=str, default="0",
                     help="Índice de la cámara (0, 1, ...) o ruta a un archivo de vídeo.")
 parser.add_argument("--cooldown", "-d", type=float, default=DEFAULT_ANNOUNCEMENT_COOLDOWN,
                     help="Cooldown en segundos entre anuncios de voz.")
+parser.add_argument("--device", type=str, default=None,
+                    help="Forzar dispositivo (p.ej. 'cuda:0', 'mps', 'directml', 'cpu'). Por defecto autodetecta.")
 
 # --- Funciones (Definiciones) ---
 # Estas funciones deben estar fuera para que puedan ser importadas
@@ -146,7 +197,7 @@ def main():
 
     ANNOUNCEMENT_COOLDOWN = args.cooldown
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = select_device(args.device)
     print(f"Usando dispositivo: {device}")
     if use_camera_index:
         print(f"Fuente de vídeo: cámara index={camera_index} | Cooldown de anuncios: {ANNOUNCEMENT_COOLDOWN}s")
