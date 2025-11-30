@@ -24,7 +24,7 @@ To install the necessary dependencies, run the following command:
 2. Run the main application:
 
 ```
-python src/vision_asistida/vision_asistida.py
+python src/vision_asistida.py
 ```
 
 Puedes forzar el dispositivo con `--device`, por ejemplo:

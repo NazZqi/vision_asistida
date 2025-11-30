@@ -116,7 +116,11 @@ def _get_tts_engine():
     global _tts_engine
     if _tts_engine is not None:
         return _tts_engine
-    engine = pyttsx3.init()
+    # En Windows forzamos el backend SAPI5 para minimizar problemas de audio.
+    try:
+        engine = pyttsx3.init(driverName="sapi5")
+    except Exception:
+        engine = pyttsx3.init()
     try:
         voices = engine.getProperty("voices") or []
         es_voice_id = None
@@ -126,8 +130,13 @@ def _get_tts_engine():
             if "es" in lang.lower() or "span" in name.lower():
                 es_voice_id = v.id
                 break
+        if es_voice_id is None and voices:
+            es_voice_id = voices[0].id  # último recurso: primera voz disponible
         if es_voice_id:
             engine.setProperty("voice", es_voice_id)
+            print(f"[TTS] Voz seleccionada: {es_voice_id}")
+        else:
+            print("[TTS] No se encontraron voces disponibles en el sistema.")
     except Exception as e:
         print(f"[TTS] No se pudo seleccionar voz en español: {e}")
 
